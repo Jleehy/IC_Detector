@@ -149,12 +149,12 @@ def detect_single_pin(input_path, output_path):
 
 if __name__ == "__main__":
     
-    input_path = 'pins.png'
+    input_path = 'pin2.png'
     #input_path = "Pin defect/A-D-64QFP-14B-SM.png"
     #input_path = "Pin defect/A-D-64QFP-15B-SM.png"
     #input_path = "Pin defect/A-J-28SOP-01B-SM.png"
     #input_path = "Pin defect/C-T-28SOP-04F-SM.png"
-    output_path = "single_pin_detected.png"
+    output_path = "pin2_detected.png"
     #crop_pin_rows(input_path, output_dir="output")
     #convert_to_grayscale(input_path, output_path)
     detect_single_pin(input_path, output_path)
