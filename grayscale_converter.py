@@ -83,6 +83,14 @@ def crop_pin_rows(input_path, output_dir="output"):
     outer_largest = max(outer_contours, key=cv2.contourArea)
     ox, oy, ow, oh = cv2.boundingRect(outer_largest)
     
+    # Add 20px padding to the outer box
+    padding = 30
+    image_height, image_width = image.shape[:2]
+    ox = max(0, ox - padding)
+    oy = max(0, oy - padding)
+    ow = min(image_width - ox, ow + 2 * padding)
+    oh = min(image_height - oy, oh + 2 * padding)
+    
     # Get base filename without extension
     base_name = os.path.splitext(os.path.basename(input_path))[0]
     
@@ -149,12 +157,14 @@ def detect_single_pin(input_path, output_path):
 
 if __name__ == "__main__":
     
-    input_path = 'pin2.png'
+    #input_path = 'pin2.png'
     #input_path = "Pin defect/A-D-64QFP-14B-SM.png"
     #input_path = "Pin defect/A-D-64QFP-15B-SM.png"
     #input_path = "Pin defect/A-J-28SOP-01B-SM.png"
     #input_path = "Pin defect/C-T-28SOP-04F-SM.png"
-    output_path = "pin2_detected.png"
-    #crop_pin_rows(input_path, output_dir="output")
+    #input_path = "IC marking/A-J-28SOP-03F-SM.png"
+    input_path = "IC marking/C-T-48QFP-20F-SM.png"
+    #output_path = "pin2_detected.png"
+    crop_pin_rows(input_path, output_dir="output")
     #convert_to_grayscale(input_path, output_path)
-    detect_single_pin(input_path, output_path)
+    #detect_single_pin(input_path, output_path)
