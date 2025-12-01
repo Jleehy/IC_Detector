@@ -21,19 +21,7 @@ class Marker:
 
     def cvprocess(self):
         image = cv2.imread(self.input_name)#Read image file
-        gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) #Grayscale
-        blurred_image = cv2.GaussianBlur(gray_image, (7,7), 0) #Gaussian blur
-        threshold, bw_image = cv2.threshold(gray_image, 60, 255, cv2.THRESH_BINARY_INV)
-        #noiseless_image = self.noise_removal(inverted_image)
-        kernel = np.ones((4,4),np.uint8)
-        dilated_image = cv2.dilate(bw_image, kernel, iterations=1)
-        cv2.imwrite(self.tempdir, dilated_image)
-    
-    def noise_removal(self, image):
-        kernel = np.ones((2, 2), np.uint8)
-        image = cv2.dilate(image, kernel, iterations=1)
-        kernel = np.ones((1, 1), np.uint8)
-        image = cv2.erode(image, kernel, iterations=1)
-        image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
-        image = cv2.medianBlur(image, 3)
-        return (image)
+        gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) #Grayscale
+        blurred_image = cv2.GaussianBlur(gray_image, (29,29), 0) #Gaussian blur
+        bw_image = cv2.threshold(blurred_image, 67, 255, cv2.THRESH_BINARY_INV)[1]
+        cv2.imwrite(self.tempdir, bw_image)
