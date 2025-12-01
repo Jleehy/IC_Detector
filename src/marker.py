@@ -23,5 +23,6 @@ class Marker:
         image = cv2.imread(self.input_name)#Read image file
         gray_image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY) #Grayscale
         blurred_image = cv2.GaussianBlur(gray_image, (29,29), 0) #Gaussian blur
-        bw_image = cv2.threshold(blurred_image, 67, 255, cv2.THRESH_BINARY_INV)[1]
+        bw_image = cv2.threshold(blurred_image, 63, 255, cv2.THRESH_BINARY_INV)[1]
         cv2.imwrite(self.tempdir, bw_image)
+
