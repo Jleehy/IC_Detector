@@ -17,8 +17,12 @@ class Marker:
             r'-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-'
         )
 
-    def tesseract(self, print_result=True):
-        # 1. Preprocess input image and save to self.tempdir
+    def tesseract(self,
+                  print_result=True,
+                  box_output=None,
+                  crop_output=None,
+                  do_crop=True):
+        # 1. Preprocess input image and save to self.tempdir (binary image)
         self.cvprocess()
 
         # 2. OCR on the processed image
@@ -27,7 +31,6 @@ class Marker:
             pil_img, config=self.custom_config
         )
 
-        # only print if requested
         if print_result:
             print(self.markings)
 
@@ -62,25 +65,31 @@ class Marker:
         x_min, y_min = min(xs), min(ys)
         x_max, y_max = max(xes), max(yes)
 
-        # Add small padding to make the box slightly larger
+        # Add padding to make the box slightly larger
         pad = 25
         x_min = max(0, x_min - pad)
         y_min = max(0, y_min - pad)
         x_max = min(pil_img.width - 1, x_max + pad)
         y_max = min(pil_img.height - 1, y_max + pad)
 
-        # 5. Draw red rectangle on original image -> test_post_box.png
-        orig = cv2.imread(self.input_name)
-        img_box = orig.copy()
-        cv2.rectangle(
-            img_box, (x_min, y_min), (x_max, y_max),
-            (0, 0, 255), 15  # thick red line
-        )
-        cv2.imwrite("temp/test_post_box.png", img_box)
+        # If we need to draw box or crop, read the original image once
+        orig = None
+        if box_output is not None or (do_crop and crop_output is not None):
+            orig = cv2.imread(self.input_name)
 
-        # 6. Crop the same region from original image -> test_post_box_cut.png
-        cut = orig[y_min:y_max, x_min:x_max]
-        cv2.imwrite("temp/test_post_box_cut.png", cut)
+        # 5. Draw red rectangle on original image
+        if box_output is not None and orig is not None:
+            img_box = orig.copy()
+            cv2.rectangle(
+                img_box, (x_min, y_min), (x_max, y_max),
+                (0, 0, 255), 15  # thick red line
+            )
+            cv2.imwrite(box_output, img_box)
+
+        # 6. Crop the same region from original image
+        if do_crop and crop_output is not None and orig is not None:
+            cut = orig[y_min:y_max, x_min:x_max]
+            cv2.imwrite(crop_output, cut)
 
     def cvprocess(self):
         image = cv2.imread(self.input_name)#Read image file
