@@ -7,8 +7,7 @@ import math
 # ================= CONFIGURATION =================
 SOURCE_DIR = r'./runs/detect/predict'
 OUTPUT_DIR = r'./analyzed_pins'
-TARGET_HEX = "0000FF"
-FAIL_COLOR_HEX = "FF0000"  # Red by default
+TARGET_HEX = "052aff"
 
 # --- LOCAL DIFFERENCE THRESHOLDS (Percentage) ---
 # Width Logic: WIDE pins fail easily (strict), THIN pins fail less likely (loose)
@@ -17,17 +16,25 @@ MAX_DIFF_W_THIN_PER = 15.0   # Width "thin" threshold (Loose: Only Color Fail if
 
 # Height Logic: SHORT pins fail easily (strict), LONG pins fail less likely (loose)
 MAX_DIFF_H_SHORT_PER = 5.5   # Height "short" threshold (Strict: Internal damage + Color Fail if > this)
-MAX_DIFF_H_LONG_PER = 15.0   # Height "long" threshold (Loose: Only Color Fail if taller than this)
+MAX_DIFF_H_LONG_PER = 10.0   # Height "long" threshold (Loose: Only Color Fail if taller than this)
 
 MAX_DIFF_A_PER = 20.0        # Area symmetric
 MAX_DIFF_AR_PER = 100        # Aspect Ratio (Height/Width) symmetric
+
+# --- ASPECT RATIO OUTLIER DETECTION ---
+# Detects crooked pins by comparing aspect ratio to the median of all pins in the image
+# Asymmetric thresholds: crooked pins typically appear shorter & wider
+MAX_AR_OUTLIER_SHORT_WIDE_PER = 14.0   # Strict: pins with lower AR (shorter & wider) than median
+MAX_AR_OUTLIER_TALL_THIN_PER = 30.0   # Loose: pins with higher AR (taller & thinner) than median
+MIN_PINS_FOR_OUTLIER = 3              # Minimum number of pins needed to perform outlier detection
 # =================================================
 
 REASON_MAP = {
     'Width': 'width',
     'Height': 'length',
     'Area': 'area',
-    'AspectRatio': 'aspect_ratio'
+    'AspectRatio': 'aspect_ratio',
+    'AspectRatioOutlier': 'crooked'
 }
 
 def hex_to_bgr(hex_color):
@@ -43,22 +50,66 @@ def get_closest_to_median_index(areas):
     median = np.median(areas)
     return np.argmin(np.abs(np.array(areas) - median))
 
-def process_directory(source_dir, output_dir):
-    if not os.path.exists(source_dir):
-        print(f"Error: Source directory '{source_dir}' does not exist.")
+def replace_blue_with_red(img, bbox, lower_bound, upper_bound, pad=4, red=(0,0,255),
+                          close_kernel=(3,3), dilate_kernel=(5,5), dilate_iters=1):
+    """
+    Replace all blue-outline pixels in bbox with red.
+
+    - Uses the same color bounds (lower_bound/upper_bound) to find blue pixels inside an expanded ROI.
+    - Performs a morphological close to bridge anti-aliased gaps, then a dilation to ensure the
+      entire outline (including overlapping edges) is covered.
+    - Does NOT change detection masks/contours used elsewhere; it's purely per-ROI recolor.
+    """
+    x, y, w, h = bbox
+    x0 = max(0, x - pad)
+    y0 = max(0, y - pad)
+    x1 = min(img.shape[1], x + w + pad)
+    y1 = min(img.shape[0], y + h + pad)
+
+    roi = img[y0:y1, x0:x1]
+    if roi.size == 0:
         return
 
-    os.makedirs(output_dir, exist_ok=True)
+    # 1) base mask: exact blue pixels in ROI using your existing bounds
+    mask_roi = cv2.inRange(roi, lower_bound, upper_bound)
+
+    # If nothing obvious found, still proceed (may be tiny); but guard:
+    if cv2.countNonZero(mask_roi) == 0:
+        # Try a tiny extra in-range tolerance step (non-destructive, only locally)
+        # Build a looser mask in HSV to catch slightly different blues without affecting detection.
+        hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        # convert target_bgr from outer scope is not available here; skip — keep conservative
+        # If nothing found, continue with mask_roi (will do nothing)
+        pass
+
+    # 2) morphological close to fill small gaps/anti-alias holes (kernel small)
+    ck = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, close_kernel)
+    mask_closed = cv2.morphologyEx(mask_roi, cv2.MORPH_CLOSE, ck, iterations=1)
+
+    # 3) dilate to ensure full coverage of the outline and overlapping edges
+    dk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, dilate_kernel)
+    mask_dilated = cv2.dilate(mask_closed, dk, iterations=dilate_iters)
+
+    # 4) Apply mask: set any selected pixel to red
+    roi[mask_dilated > 0] = red
+    img[y0:y1, x0:x1] = roi
+
+
+def process_directory():
+    if not os.path.exists(SOURCE_DIR):
+        print(f"Error: Source directory '{SOURCE_DIR}' does not exist.")
+        return
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     types = ('*.png', '*.jpg', '*.jpeg', '*.bmp')
     image_files = []
     for files in types:
-        image_files.extend(glob.glob(os.path.join(source_dir, files)))
+        image_files.extend(glob.glob(os.path.join(SOURCE_DIR, files)))
 
-    print(f"Found {len(image_files)} images in {source_dir}...")
+    print(f"Found {len(image_files)} images in {SOURCE_DIR}...")
 
     target_bgr = hex_to_bgr(TARGET_HEX)
-    fail_color_bgr = hex_to_bgr(FAIL_COLOR_HEX)
     tolerance = 15
     lower_bound = np.array([max(0, c - tolerance) for c in target_bgr])
     upper_bound = np.array([min(255, c + tolerance) for c in target_bgr])
@@ -108,12 +159,37 @@ def process_directory(source_dir, output_dir):
 
         if len(box_data) < 2:
             print("   Not enough pins detected for comparison. Skipping.")
-            cv2.imwrite(os.path.join(output_dir, filename), img)
+            cv2.imwrite(os.path.join(OUTPUT_DIR, filename), img)
             continue
 
         # Baseline logic
         areas = [b['Area'] for b in box_data]
         baseline_index = get_closest_to_median_index(areas)
+
+        # --- ASPECT RATIO OUTLIER DETECTION ---
+        # Calculate median aspect ratio for the image
+        aspect_ratios = [b['AspectRatio'] for b in box_data]
+        median_ar = np.median(aspect_ratios)
+        ar_outlier_short_wide_th = MAX_AR_OUTLIER_SHORT_WIDE_PER / 100.0  # Strict
+        ar_outlier_tall_thin_th = MAX_AR_OUTLIER_TALL_THIN_PER / 100.0    # Loose
+
+        # Mark aspect ratio outliers (only if we have enough pins)
+        if len(box_data) >= MIN_PINS_FOR_OUTLIER:
+            for pin in box_data:
+                if median_ar > 0:
+                    ar_diff = pin['AspectRatio'] - median_ar
+                    ar_deviation = abs(ar_diff) / median_ar
+
+                    # Asymmetric thresholds: stricter for short/wide, looser for tall/thin
+                    if ar_diff < 0:  # Pin is shorter & wider than median (likely crooked)
+                        pin['is_ar_outlier'] = ar_deviation > ar_outlier_short_wide_th
+                    else:  # Pin is taller & thinner than median
+                        pin['is_ar_outlier'] = ar_deviation > ar_outlier_tall_thin_th
+                else:
+                    pin['is_ar_outlier'] = False
+        else:
+            for pin in box_data:
+                pin['is_ar_outlier'] = False
 
         # Sort top-to-bottom for consistent neighbor comparison
         box_data.sort(key=lambda x: x['bbox'][1])
@@ -132,6 +208,20 @@ def process_directory(source_dir, output_dir):
 
         for i in range(len(box_data)):
             current_pin = box_data[i]
+
+            # --- CHECK ASPECT RATIO OUTLIER FIRST ---
+            if current_pin['is_ar_outlier']:
+                current_pin['is_damaged'] = True
+                damage_found = True
+                image_failure_metrics.add('AspectRatioOutlier')
+
+                # Replace blue pixels with red in this pin's bbox (no drawing of boxes)
+                replace_blue_with_red(img, current_pin['bbox'], lower_bound, upper_bound)
+                x, y, w, h = current_pin['bbox']
+                label = f"FAIL (CROOKED)"
+                cv2.putText(img, label, (x, y - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+                continue  # Skip other checks for this pin
 
             # Skip baseline pin itself
             if i == baseline_pin_index:
@@ -153,7 +243,7 @@ def process_directory(source_dir, output_dir):
             color_reasons = []     # metrics that cause visual (colored) FAIL
 
             for metric in metrics_to_check:
-                
+
                 # --- HEIGHT LOGIC (Existing) ---
                 if metric == 'Height':
                     short_th = percentage_thresholds['Height_short']
@@ -163,7 +253,7 @@ def process_directory(source_dir, output_dir):
                     if refv == 0: continue
 
                     signed_diff = (curr - refv) / refv  # negative => shorter, positive => longer
-                    
+
                     # Internal marking if absolute diff > short threshold
                     if abs(signed_diff) > short_th:
                         internal_reasons.append(metric)
@@ -220,22 +310,25 @@ def process_directory(source_dir, output_dir):
             # Draw colored fail only if color_reasons present
             if color_reasons:
                 damage_found = True
-                # Draw colored contour + label
-                cv2.drawContours(img, [current_pin['cnt']], -1, fail_color_bgr, 3)
+                # Replace blue pixels with red for this pin only (no outline drawing)
+                replace_blue_with_red(img, current_pin['bbox'], lower_bound, upper_bound)
                 x, y, w, h = current_pin['bbox']
                 label = f"FAIL ({len(color_reasons)})"
                 cv2.putText(img, label, (x, y - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, fail_color_bgr, 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
         # Save image
-        output_path = os.path.join(output_dir, filename)
+        output_path = os.path.join(OUTPUT_DIR, filename)
         cv2.imwrite(output_path, img)
 
         status = "DAMAGED PINS FOUND" if damage_found else "ALL OK"
-        print(f"   Status: {status} | Saved to {output_dir}")
+        print(f"   Status: {status} | Saved to {OUTPUT_DIR}")
 
         # Print summary reasons (internal reasons)
         if image_failure_metrics:
             for metric in sorted(image_failure_metrics):
                 print(f"                 {REASON_MAP[metric]} fail")
 
+
+if __name__ == "__main__":
+    process_directory()
