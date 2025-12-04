@@ -1,0 +1,7 @@
+.env
+__pycache__/
+temp/
+*.pyc
+.DS_Store
+ic-detection-480123-754fd4d1a492.json
+
