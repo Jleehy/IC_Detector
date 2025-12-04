@@ -4,3 +4,5 @@ numpy
 pytesseract
 Pillow
 python-dotenv
+ultralytics
+
