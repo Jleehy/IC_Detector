@@ -13,9 +13,6 @@ def detect_pins(input_dir='output', output_dir='output_shrunk'):
     # Note: YOLO predict can take a directory path
     results = model.predict(input_dir, save=False, show_conf=False, show_labels=False)
 
-    # Shrink factor (0.9 means 90% of original size)
-    # SHRINK_FACTOR = 0.9
-
     for i, result in enumerate(results):
         # Get original image
         img = result.orig_img.copy()
@@ -26,27 +23,8 @@ def detect_pins(input_dir='output', output_dir='output_shrunk'):
         for box in boxes:
             x1, y1, x2, y2 = box
             
-            # Calculate center and dimensions
-            # w = x2 - x1
-            # h = y2 - y1
-            # cx = x1 + w / 2
-            # cy = y1 + h / 2
-            
-            # Calculate new dimensions
-            # new_w = w * SHRINK_FACTOR
-            # new_h = h * SHRINK_FACTOR
-            
-            # Calculate new coordinates
-            # new_x1 = int(cx - new_w / 2)
-            # new_y1 = int(cy - new_h / 2)
-            # new_x2 = int(cx + new_w / 2)
-            # new_y2 = int(cy + new_h / 2)
-            
-            # Draw new box (Blue color, thickness 2)
-            # cv2.rectangle(img, (new_x1, new_y1), (new_x2, new_y2), (255, 0, 0), 2)
-            
-            # Draw original box (Blue color, thickness 2)
-            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 0, 0), 2)
+            # Draw original box (Blue color matching detect_bad_pins.py target #052aff -> BGR: 255, 42, 5)
+            cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (255, 42, 5), 2)
             
         # Save image
         # Use original filename if available, otherwise generate one

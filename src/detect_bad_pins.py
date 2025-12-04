@@ -95,19 +95,22 @@ def replace_blue_with_red(img, bbox, lower_bound, upper_bound, pad=4, red=(0,0,2
     img[y0:y1, x0:x1] = roi
 
 
-def process_directory():
-    if not os.path.exists(SOURCE_DIR):
-        print(f"Error: Source directory '{SOURCE_DIR}' does not exist.")
+def process_directory(source_dir=None, output_dir=None):
+    src = source_dir if source_dir else SOURCE_DIR
+    out = output_dir if output_dir else OUTPUT_DIR
+
+    if not os.path.exists(src):
+        print(f"Error: Source directory '{src}' does not exist.")
         return
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
 
     types = ('*.png', '*.jpg', '*.jpeg', '*.bmp')
     image_files = []
     for files in types:
-        image_files.extend(glob.glob(os.path.join(SOURCE_DIR, files)))
+        image_files.extend(glob.glob(os.path.join(src, files)))
 
-    print(f"Found {len(image_files)} images in {SOURCE_DIR}...")
+    print(f"Found {len(image_files)} images in {src}...")
 
     target_bgr = hex_to_bgr(TARGET_HEX)
     tolerance = 15
@@ -159,7 +162,7 @@ def process_directory():
 
         if len(box_data) < 2:
             print("   Not enough pins detected for comparison. Skipping.")
-            cv2.imwrite(os.path.join(OUTPUT_DIR, filename), img)
+            cv2.imwrite(os.path.join(out, filename), img)
             continue
 
         # Baseline logic
@@ -318,11 +321,11 @@ def process_directory():
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
         # Save image
-        output_path = os.path.join(OUTPUT_DIR, filename)
+        output_path = os.path.join(out, filename)
         cv2.imwrite(output_path, img)
 
         status = "DAMAGED PINS FOUND" if damage_found else "ALL OK"
-        print(f"   Status: {status} | Saved to {OUTPUT_DIR}")
+        print(f"   Status: {status} | Saved to {out}")
 
         # Print summary reasons (internal reasons)
         if image_failure_metrics:
