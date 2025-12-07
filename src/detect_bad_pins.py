@@ -70,27 +70,19 @@ def replace_blue_with_red(img, bbox, lower_bound, upper_bound, pad=4, red=(0,0,2
     if roi.size == 0:
         return
 
-    # 1) base mask: exact blue pixels in ROI using your existing bounds
+    
     mask_roi = cv2.inRange(roi, lower_bound, upper_bound)
 
-    # If nothing obvious found, still proceed (may be tiny); but guard:
     if cv2.countNonZero(mask_roi) == 0:
-        # Try a tiny extra in-range tolerance step (non-destructive, only locally)
-        # Build a looser mask in HSV to catch slightly different blues without affecting detection.
         hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        # convert target_bgr from outer scope is not available here; skip — keep conservative
-        # If nothing found, continue with mask_roi (will do nothing)
         pass
 
-    # 2) morphological close to fill small gaps/anti-alias holes (kernel small)
     ck = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, close_kernel)
     mask_closed = cv2.morphologyEx(mask_roi, cv2.MORPH_CLOSE, ck, iterations=1)
 
-    # 3) dilate to ensure full coverage of the outline and overlapping edges
     dk = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, dilate_kernel)
     mask_dilated = cv2.dilate(mask_closed, dk, iterations=dilate_iters)
 
-    # 4) Apply mask: set any selected pixel to red
     roi[mask_dilated > 0] = red
     img[y0:y1, x0:x1] = roi
 
@@ -117,12 +109,11 @@ def process_directory(source_dir=None, output_dir=None):
     lower_bound = np.array([max(0, c - tolerance) for c in target_bgr])
     upper_bound = np.array([min(255, c + tolerance) for c in target_bgr])
 
-    # Local comparison thresholds (in decimals)
     percentage_thresholds = {
-        'Width_wide': MAX_DIFF_W_WIDE_PER / 100.0,   # Strict
-        'Width_thin': MAX_DIFF_W_THIN_PER / 100.0,   # Loose
-        'Height_short': MAX_DIFF_H_SHORT_PER / 100.0, # Strict
-        'Height_long': MAX_DIFF_H_LONG_PER / 100.0,   # Loose
+        'Width_wide': MAX_DIFF_W_WIDE_PER / 100.0,   # strict - surely this works, lul
+        'Width_thin': MAX_DIFF_W_THIN_PER / 100.0,   # loose
+        'Height_short': MAX_DIFF_H_SHORT_PER / 100.0, # strict
+        'Height_long': MAX_DIFF_H_LONG_PER / 100.0,   # loose
         'Area': MAX_DIFF_A_PER / 100.0,
         'AspectRatio': MAX_DIFF_AR_PER / 100.0,
     }
@@ -165,28 +156,23 @@ def process_directory(source_dir=None, output_dir=None):
             cv2.imwrite(os.path.join(out, filename), img)
             continue
 
-        # Baseline logic
         areas = [b['Area'] for b in box_data]
         baseline_index = get_closest_to_median_index(areas)
 
-        # --- ASPECT RATIO OUTLIER DETECTION ---
-        # Calculate median aspect ratio for the image
         aspect_ratios = [b['AspectRatio'] for b in box_data]
         median_ar = np.median(aspect_ratios)
-        ar_outlier_short_wide_th = MAX_AR_OUTLIER_SHORT_WIDE_PER / 100.0  # Strict
-        ar_outlier_tall_thin_th = MAX_AR_OUTLIER_TALL_THIN_PER / 100.0    # Loose
+        ar_outlier_short_wide_th = MAX_AR_OUTLIER_SHORT_WIDE_PER / 100.0  # strict
+        ar_outlier_tall_thin_th = MAX_AR_OUTLIER_TALL_THIN_PER / 100.0    # loose
 
-        # Mark aspect ratio outliers (only if we have enough pins)
         if len(box_data) >= MIN_PINS_FOR_OUTLIER:
             for pin in box_data:
                 if median_ar > 0:
                     ar_diff = pin['AspectRatio'] - median_ar
                     ar_deviation = abs(ar_diff) / median_ar
 
-                    # Asymmetric thresholds: stricter for short/wide, looser for tall/thin
-                    if ar_diff < 0:  # Pin is shorter & wider than median (likely crooked)
+                    if ar_diff < 0:  
                         pin['is_ar_outlier'] = ar_deviation > ar_outlier_short_wide_th
-                    else:  # Pin is taller & thinner than median
+                    else:  
                         pin['is_ar_outlier'] = ar_deviation > ar_outlier_tall_thin_th
                 else:
                     pin['is_ar_outlier'] = False
@@ -194,15 +180,12 @@ def process_directory(source_dir=None, output_dir=None):
             for pin in box_data:
                 pin['is_ar_outlier'] = False
 
-        # Sort top-to-bottom for consistent neighbor comparison
         box_data.sort(key=lambda x: x['bbox'][1])
 
         damage_found = False
         image_failure_metrics = set()
 
-        # Find baseline pin index after sorting (match by area)
         baseline_pin_area = areas[baseline_index]
-        # In case of duplicates, pick the first matching entry
         baseline_pin_index = next(i for i, b in enumerate(box_data) if b['Area'] == baseline_pin_area)
 
         reference_pin_data = box_data[baseline_pin_index]
@@ -212,25 +195,21 @@ def process_directory(source_dir=None, output_dir=None):
         for i in range(len(box_data)):
             current_pin = box_data[i]
 
-            # --- CHECK ASPECT RATIO OUTLIER FIRST ---
             if current_pin['is_ar_outlier']:
                 current_pin['is_damaged'] = True
                 damage_found = True
                 image_failure_metrics.add('AspectRatioOutlier')
 
-                # Replace blue pixels with red in this pin's bbox (no drawing of boxes)
                 replace_blue_with_red(img, current_pin['bbox'], lower_bound, upper_bound)
                 x, y, w, h = current_pin['bbox']
                 label = f"FAIL (CROOKED)"
                 cv2.putText(img, label, (x, y - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                continue  # Skip other checks for this pin
+                continue  
 
-            # Skip baseline pin itself
             if i == baseline_pin_index:
                 continue
 
-            # --- Determine Reference Pin (R) with look-backwards skipping damaged pins ---
             ref_pin = None
             if i > 0 and not box_data[i-1]['is_damaged']:
                 ref_pin = box_data[i-1]
@@ -242,12 +221,11 @@ def process_directory(source_dir=None, output_dir=None):
             if ref_pin is None:
                 ref_pin = reference_pin_data
 
-            internal_reasons = []  # metrics that cause internal damaged marking (excluded from refs)
-            color_reasons = []     # metrics that cause visual (colored) FAIL
+            internal_reasons = []  
+            color_reasons = []     
 
             for metric in metrics_to_check:
 
-                # --- HEIGHT LOGIC (Existing) ---
                 if metric == 'Height':
                     short_th = percentage_thresholds['Height_short']
                     long_th = percentage_thresholds['Height_long']
@@ -255,46 +233,38 @@ def process_directory(source_dir=None, output_dir=None):
                     refv = ref_pin['Height']
                     if refv == 0: continue
 
-                    signed_diff = (curr - refv) / refv  # negative => shorter, positive => longer
+                    signed_diff = (curr - refv) / refv  
 
-                    # Internal marking if absolute diff > short threshold
                     if abs(signed_diff) > short_th:
                         internal_reasons.append(metric)
 
-                    # Visual coloring rules:
-                    #  - shorter than allowed => color (fail)
-                    #  - only color longer pins if they exceed the LONG threshold
+
                     if signed_diff < -short_th:
                         color_reasons.append(metric)
                     elif signed_diff > long_th:
                         color_reasons.append(metric)
                     continue
 
-                # --- WIDTH LOGIC (New) ---
                 if metric == 'Width':
-                    wide_th = percentage_thresholds['Width_wide'] # Strict (e.g. 5.5%)
-                    thin_th = percentage_thresholds['Width_thin'] # Loose (e.g. 15.0%)
+                    wide_th = percentage_thresholds['Width_wide'] 
+                    thin_th = percentage_thresholds['Width_thin'] 
                     curr = current_pin['Width']
                     refv = ref_pin['Width']
                     if refv == 0: continue
 
-                    signed_diff = (curr - refv) / refv # negative => thinner, positive => wider
+                    signed_diff = (curr - refv) / refv 
 
-                    # Internal marking if absolute diff > WIDE (strict) threshold
-                    # This prevents slightly wide or slightly thin pins from being used as references
+
                     if abs(signed_diff) > wide_th:
                         internal_reasons.append(metric)
 
-                    # Visual coloring rules:
-                    # - Wider than allowed (Strict) => color (fail)
-                    # - Only color thinner pins if they exceed the THIN (Loose) threshold
+
                     if signed_diff > wide_th:
                         color_reasons.append(metric)
                     elif signed_diff < -thin_th:
                         color_reasons.append(metric)
                     continue
 
-                # --- SYMMETRIC LOGIC (Area, Aspect Ratio) ---
                 threshold = percentage_thresholds.get(metric, 0.0)
                 curr = current_pin[metric]
                 refv = ref_pin[metric]
@@ -305,29 +275,24 @@ def process_directory(source_dir=None, output_dir=None):
                     internal_reasons.append(metric)
                     color_reasons.append(metric)
 
-            # If internal reasons exist -> mark internally damaged and don't allow it to be used as future ref
             if internal_reasons:
                 current_pin['is_damaged'] = True
                 image_failure_metrics.update(internal_reasons)
 
-            # Draw colored fail only if color_reasons present
             if color_reasons:
                 damage_found = True
-                # Replace blue pixels with red for this pin only (no outline drawing)
                 replace_blue_with_red(img, current_pin['bbox'], lower_bound, upper_bound)
                 x, y, w, h = current_pin['bbox']
                 label = f"FAIL ({len(color_reasons)})"
                 cv2.putText(img, label, (x, y - 5),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
-        # Save image
         output_path = os.path.join(out, filename)
         cv2.imwrite(output_path, img)
 
         status = "DAMAGED PINS FOUND" if damage_found else "ALL OK"
         print(f"   Status: {status} | Saved to {out}")
 
-        # Print summary reasons (internal reasons)
         if image_failure_metrics:
             for metric in sorted(image_failure_metrics):
                 print(f"                 {REASON_MAP[metric]} fail")
