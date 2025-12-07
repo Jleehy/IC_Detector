@@ -1,4 +1,5 @@
 # IC_Detector
+# https://github.com/Jleehy/IC_Detector/tree/master
 Repo for EECS 690 (783) IC detection project
 
 Timeline - excle
