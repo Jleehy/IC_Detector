@@ -2,7 +2,7 @@
 # https://github.com/Jleehy/IC_Detector/tree/master
 Repo for EECS 690 (783) IC detection project
 
-Timeline - excle
+Timeline - excel
 https://kansas-my.sharepoint.com/:x:/g/personal/s803s199_home_ku_edu/ESS4Z3hTPQ9Gk2kHx_dROKIB3m23Sv2ybKYqHFhkZEuwjQ?e=Qo6MwE
 
 draw.io
